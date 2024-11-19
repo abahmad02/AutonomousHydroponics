@@ -20,6 +20,7 @@ void loop() {
   Serial.print(voltage, 2);
   Serial.print(" V, pH: ");
   Serial.println(pH, 2);
+  
 
   delay(1000); // Delay between readings
 }
