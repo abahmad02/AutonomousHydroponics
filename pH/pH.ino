@@ -1,5 +1,5 @@
 const int pHSensorPin = A0;
-const float voltageAtpH7 = 3.6;  // Adjusted voltage at pH 7
+const float voltageAtpH7 = 3.295;  // Adjusted voltage at pH 7
 const float slope = -0.18;        // Adjust slope based on your calibration data
 
 void setup() {

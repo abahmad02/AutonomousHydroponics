@@ -9,10 +9,11 @@ const char* password = "12345678";
 ESP8266WebServer server(80);
 
 String ecReading = "Waiting for data...";  // Initial EC reading
+String pHReading = "Waiting for data...";  // Initial pH reading
 
 void setup() {
   Serial.begin(9600);   // Begin serial communication with Arduino
-  
+
   // Set up ESP8266 as an access point
   WiFi.softAP(ssid, password);
   IPAddress IP = WiFi.softAPIP();
@@ -24,32 +25,35 @@ void setup() {
     server.send(200, "text/html", R"rawliteral(
       <html>
         <head>
-          <title>EC Sensor Data</title>
+          <title>Sensor Data</title>
           <script>
-            // Function to request EC data from the server and update the page
-            function fetchECData() {
-              fetch("/ec")
-                .then(response => response.text())
+            // Function to request sensor data and update the page
+            function fetchData() {
+              fetch("/data")
+                .then(response => response.json())
                 .then(data => {
-                  document.getElementById("ecValue").innerText = data + " mS/cm";
+                  document.getElementById("ecValue").innerText = data.ec + " mS/cm";
+                  document.getElementById("pHValue").innerText = data.pH;
                 })
-                .catch(error => console.error("Error fetching EC data:", error));
+                .catch(error => console.error("Error fetching sensor data:", error));
             }
-            // Fetch EC data every 2 seconds
-            setInterval(fetchECData, 2000);
+            // Fetch data every 2 seconds
+            setInterval(fetchData, 2000);
           </script>
         </head>
         <body>
-          <h1>EC Sensor Data</h1>
-          <p>EC Value: <span id="ecValue">Waiting for data...</span></p>
+          <h1>Sensor Data</h1>
+          <p><strong>EC Value:</strong> <span id="ecValue">Waiting for data...</span></p>
+          <p><strong>pH Value:</strong> <span id="pHValue">Waiting for data...</span></p>
         </body>
       </html>
     )rawliteral");
   });
 
-  // Route to handle AJAX request for EC data
-  server.on("/ec", []() {
-    server.send(200, "text/plain", ecReading);  // Send the EC reading only
+  // Route to handle sensor data requests
+  server.on("/data", []() {
+    String jsonResponse = "{ \"ec\": \"" + ecReading + "\", \"pH\": \"" + pHReading + "\" }";
+    server.send(200, "application/json", jsonResponse);  // Send EC and pH readings as JSON
   });
 
   // Start the server
@@ -60,8 +64,20 @@ void setup() {
 void loop() {
   // Check if there's data available from the Arduino
   if (Serial.available()) {
-    ecReading = Serial.readStringUntil('\n');  // Read the data from the Arduino
-    Serial.println("Received from Arduino: " + ecReading);
+    String input = Serial.readStringUntil('\n');  // Read the data from the Arduino
+    input.trim();  // Remove any extra whitespace or newline characters
+
+    // Parse EC or pH values
+    if (input.startsWith("EC Value:")) {
+      ecReading = input.substring(10);  // Extract EC value
+      ecReading.trim();  // Remove any extra whitespace
+      Serial.println("Updated EC value: " + ecReading);
+    } else if (input.startsWith("pH Value:")) {
+      pHReading = input.substring(10);  // Extract pH value
+      pHReading.trim();  // Remove any extra whitespace
+      Serial.println("Updated pH value: " + pHReading);
+    }
+
   }
 
   server.handleClient();  // Handle web server client

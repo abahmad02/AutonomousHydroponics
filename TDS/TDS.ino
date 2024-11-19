@@ -1,8 +1,15 @@
 #include <SoftwareSerial.h>
 
-// Define the pin where the EC sensor is connected
-const int ecPin = A1;  // Analog pin A1 for the sensor
-const int relayPin = 7;  // Pin connected to the relay module
+// Define the pins for EC and pH sensors
+const int ecPin = A1;         // Analog pin A1 for the EC sensor
+const int pHSensorPin = A0;   // Analog pin A0 for the pH sensor
+const int relayPin = 7;       // Pin connected to the relay module
+const int motor1 = 2;
+const int motor2 = 4;
+
+// pH sensor calibration constants
+const float voltageAtpH7 = 3.23;  // Adjusted voltage at pH 7
+const float slope = -0.18;         // Adjust slope based on your calibration data
 
 // Define pins for SoftwareSerial
 const int txPin = 5;  // TX pin connected to NodeMCU RX
@@ -14,30 +21,51 @@ void setup() {
   Serial.begin(9600);       // Start Serial communication for debugging
   espSerial.begin(9600);    // Start SoftwareSerial at the same baud rate
   
-  pinMode(relayPin, OUTPUT);  // Set the relay pin as an output
+  pinMode(relayPin, OUTPUT);
+  pinMode(motor1, OUTPUT);  // Set the relay pin as an output
+  pinMode(motor2, OUTPUT);
+
+  Serial.println("EC and pH Sensor Test");
+  delay(1000);  // Wait for stabilization
 }
 
 void loop() {
-  int ecValue = analogRead(ecPin);  // Read the analog value from the sensor
+  // Read EC sensor value
+  int ecValue = analogRead(ecPin);  // Read the analog value from the EC sensor
+  float ecVoltage = ecValue * (5.0 / 1023.0);  // Convert the reading to voltage
+  float ec = ecVoltage * 1000;  // Example conversion to mS/cm (adjust as needed)
+  
+  // Read pH sensor value
+  int pHSensorValue = analogRead(pHSensorPin);  // Read the analog value from the pH sensor
+  float pHVoltage = pHSensorValue * (5.0 / 1023.0);  // Convert to voltage
+  float pH = 7.0 + ((pHVoltage - voltageAtpH7) / slope);  // Calculate pH value
 
-  // Convert the raw reading to a meaningful value (adjust based on your specific EC sensor)
-  float voltage = ecValue * (5.0 / 1023.0);  // Convert the reading to voltage
-  float ec = voltage * 1000;  // Example conversion to mS/cm (adjust as needed)
-  
+  // Print EC and pH values to the Serial Monitor
   Serial.print("EC Value: ");
-  Serial.print(ec);  // Print the EC value to the Serial Monitor
+  Serial.print(ec);
   Serial.println(" mS/cm");
-  
-  // Send the EC reading to the NodeMCU
+
+  Serial.print("pH Value: ");
+  Serial.println(pH, 2);
+
+  // Send EC and pH values to the NodeMCU
   espSerial.print("EC Value: ");
-  espSerial.print(ec);  // Send EC value over SoftwareSerial to NodeMCU
+  espSerial.print(ec);
   espSerial.println(" mS/cm");
-  
-  // Relay control logic
+
+  espSerial.print("pH Value: ");
+  espSerial.println(pH, 2);
+
+  // Relay control logic based on EC value
   if (ec < 900) {
     digitalWrite(relayPin, LOW);  // Turn relay off
+    digitalWrite(motor1, LOW);
+    digitalWrite(motor2, LOW);
   } else {
-    digitalWrite(relayPin, HIGH);  // Turn relay on
+    digitalWrite(relayPin, HIGH);
+    digitalWrite(motor1, HIGH);
+    digitalWrite(motor2, HIGH);
+      // Turn relay on
   }
   
   delay(1000);  // Wait for a second before the next reading
