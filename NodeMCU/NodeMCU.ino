@@ -1,29 +1,26 @@
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
-#include <FS.h>  // Include SPIFFS library
 
 // WiFi Access Point credentials
 const char* ssid = "ESP8266_AP";
 const char* password = "12345678";
 
-// Web server
+// Create an instance of the web server on port 80
 ESP8266WebServer server(80);
 
-// Circular buffer for data (store last 100 entries)
-#define MAX_ENTRIES 100
-String ecLog[MAX_ENTRIES];
-String pHLog[MAX_ENTRIES];
-String timeLog[MAX_ENTRIES];
-int currentIndex = 0;
+String ecReading = "0.0";  // Default EC reading
+String pHReading = "7.0"; // Default pH reading
 
 void setup() {
-  Serial.begin(9600);  // Begin serial communication
-  WiFi.softAP(ssid, password);  // Set up the ESP as an access point
+  Serial.begin(9600);   // Begin serial communication with Arduino
+
+  // Set up ESP8266 as an access point
+  WiFi.softAP(ssid, password);
   IPAddress IP = WiFi.softAPIP();
   Serial.print("AP IP address: ");
   Serial.println(IP);
 
-  // Route to serve the main HTML page
+  // Serve the main HTML page
   server.on("/", []() {
     server.send(200, "text/html", R"rawliteral(
       <!DOCTYPE html>
@@ -34,7 +31,6 @@ void setup() {
         <script>
           let ecChart, pHChart;
 
-          // Initialize the charts
           function createCharts() {
             const ctx1 = document.getElementById('ecChart').getContext('2d');
             const ctx2 = document.getElementById('pHChart').getContext('2d');
@@ -72,26 +68,33 @@ void setup() {
             });
           }
 
-          // Fetch data and update the charts
           async function fetchData() {
-            const response = await fetch('/history');
+            const response = await fetch('/data');
             const data = await response.json();
+            const timestamp = new Date().toLocaleTimeString();
 
-            // Update EC chart
-            ecChart.data.labels = data.map(entry => entry.time);
-            ecChart.data.datasets[0].data = data.map(entry => entry.ec);
+            // Update EC Chart
+            ecChart.data.labels.push(timestamp);
+            ecChart.data.datasets[0].data.push(data.ec);
+            if (ecChart.data.labels.length > 20) {
+              ecChart.data.labels.shift(); // Keep the latest 20 points
+              ecChart.data.datasets[0].data.shift();
+            }
             ecChart.update();
 
-            // Update pH chart
-            pHChart.data.labels = data.map(entry => entry.time);
-            pHChart.data.datasets[0].data = data.map(entry => entry.pH);
+            // Update pH Chart
+            pHChart.data.labels.push(timestamp);
+            pHChart.data.datasets[0].data.push(data.pH);
+            if (pHChart.data.labels.length > 20) {
+              pHChart.data.labels.shift();
+              pHChart.data.datasets[0].data.shift();
+            }
             pHChart.update();
           }
 
-          // Refresh data every 5 seconds
-          setInterval(fetchData, 5000);
+          // Fetch data every 2 seconds
+          setInterval(fetchData, 2000);
 
-          // Load charts after the page loads
           window.onload = createCharts;
         </script>
       </head>
@@ -104,42 +107,33 @@ void setup() {
     )rawliteral");
   });
 
-  // Route to handle historical data
-  server.on("/history", []() {
-    String historyJson = "[";
-    for (int i = 0; i < MAX_ENTRIES; i++) {
-      if (ecLog[i].length() > 0 && pHLog[i].length() > 0) {
-        if (i > 0) historyJson += ",";
-        historyJson += "{";
-        historyJson += "\"time\":\"" + timeLog[i] + "\",";
-        historyJson += "\"ec\":" + ecLog[i] + ",";
-        historyJson += "\"pH\":" + pHLog[i];
-        historyJson += "}";
-      }
-    }
-    historyJson += "]";
-    server.send(200, "application/json", historyJson);
+  // Route to provide sensor data as JSON
+  server.on("/data", []() {
+    String jsonResponse = "{ \"ec\": \"" + ecReading + "\", \"pH\": \"" + pHReading + "\" }";
+    server.send(200, "application/json", jsonResponse);  // Send EC and pH readings as JSON
   });
 
-  server.begin();  // Start the server
+  // Start the server
+  server.begin();
   Serial.println("Web server started!");
 }
 
 void loop() {
-  // Simulated reading and logging every 5 seconds
-  static unsigned long lastLogTime = 0;
-  if (millis() - lastLogTime > 5000) {
-    lastLogTime = millis();
-    String ecValue = String(random(500, 1500) / 100.0);  // Simulated EC value
-    String pHValue = String(random(40, 80) / 10.0);      // Simulated pH value
-    String timeValue = String(millis() / 1000) + "s";    // Simulated timestamp
+  // Check for data from the Arduino
+  if (Serial.available()) {
+    String input = Serial.readStringUntil('\n');  // Read the data
+    input.trim();  // Remove whitespace or newline
 
-    ecLog[currentIndex] = ecValue;
-    pHLog[currentIndex] = pHValue;
-    timeLog[currentIndex] = timeValue;
-    currentIndex = (currentIndex + 1) % MAX_ENTRIES;
-
-    Serial.println("Logged: " + ecValue + " mS/cm, " + pHValue + " pH");
+    // Parse EC or pH values
+    if (input.startsWith("EC Value:")) {
+      ecReading = input.substring(10);  // Extract EC value
+      ecReading.trim();
+      Serial.println("Updated EC value: " + ecReading);
+    } else if (input.startsWith("pH Value:")) {
+      pHReading = input.substring(10);  // Extract pH value
+      pHReading.trim();
+      Serial.println("Updated pH value: " + pHReading);
+    }
   }
 
   server.handleClient();  // Handle client requests
