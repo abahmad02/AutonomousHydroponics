@@ -1,140 +1,117 @@
 #include <ESP8266WiFi.h>
-#include <ESP8266WebServer.h>
+#include <WiFiClient.h>
+#include <ArduinoJson.h>
 
 // WiFi Access Point credentials
-const char* ssid = "ESP8266_AP";
-const char* password = "12345678";
+const char* ssid = "ESP8266_AP";       // SSID for ESP8266's AP
+const char* password = "12345678";     // Password for ESP8266's AP
 
-// Create an instance of the web server on port 80
-ESP8266WebServer server(80);
+// Flask server details (Update with your PC's IP address)
+const char* serverIP = "192.168.4.2";  // PC's IP on ESP8266 network
+const int serverPort = 5000;           // Flask server port
 
-String ecReading = "0.0";  // Default EC reading
-String pHReading = "7.0"; // Default pH reading
+// Variables for sensor data
+String ecReading = "0";   // EC value placeholder
+String pHReading = "7";   // pH value placeholder
+String incomingData = ""; // String to hold incoming data
 
 void setup() {
-  Serial.begin(9600);   // Begin serial communication with Arduino
+  Serial.begin(9600);  // Initialize serial communication
 
   // Set up ESP8266 as an access point
   WiFi.softAP(ssid, password);
   IPAddress IP = WiFi.softAPIP();
-  Serial.print("AP IP address: ");
+  Serial.print("ESP8266 AP IP address: ");
   Serial.println(IP);
 
-  // Serve the main HTML page
-  server.on("/", []() {
-    server.send(200, "text/html", R"rawliteral(
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <title>Sensor Data Chart</title>
-        <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-        <script>
-          let ecChart, pHChart;
-
-          function createCharts() {
-            const ctx1 = document.getElementById('ecChart').getContext('2d');
-            const ctx2 = document.getElementById('pHChart').getContext('2d');
-            
-            ecChart = new Chart(ctx1, {
-              type: 'line',
-              data: {
-                labels: [],  // Timestamps
-                datasets: [{
-                  label: 'EC (mS/cm)',
-                  data: [],
-                  borderColor: 'blue',
-                  backgroundColor: 'rgba(0, 0, 255, 0.1)',
-                  pointRadius: 4,
-                  fill: true
-                }]
-              },
-              options: { responsive: true, scales: { x: { display: true }, y: { beginAtZero: true } } }
-            });
-
-            pHChart = new Chart(ctx2, {
-              type: 'line',
-              data: {
-                labels: [],  // Timestamps
-                datasets: [{
-                  label: 'pH',
-                  data: [],
-                  borderColor: 'green',
-                  backgroundColor: 'rgba(0, 255, 0, 0.1)',
-                  pointRadius: 4,
-                  fill: true
-                }]
-              },
-              options: { responsive: true, scales: { x: { display: true }, y: { beginAtZero: true } } }
-            });
-          }
-
-          async function fetchData() {
-            const response = await fetch('/data');
-            const data = await response.json();
-            const timestamp = new Date().toLocaleTimeString();
-
-            // Update EC Chart
-            ecChart.data.labels.push(timestamp);
-            ecChart.data.datasets[0].data.push(data.ec);
-            if (ecChart.data.labels.length > 20) {
-              ecChart.data.labels.shift(); // Keep the latest 20 points
-              ecChart.data.datasets[0].data.shift();
-            }
-            ecChart.update();
-
-            // Update pH Chart
-            pHChart.data.labels.push(timestamp);
-            pHChart.data.datasets[0].data.push(data.pH);
-            if (pHChart.data.labels.length > 20) {
-              pHChart.data.labels.shift();
-              pHChart.data.datasets[0].data.shift();
-            }
-            pHChart.update();
-          }
-
-          // Fetch data every 2 seconds
-          setInterval(fetchData, 2000);
-
-          window.onload = createCharts;
-        </script>
-      </head>
-      <body>
-        <h1>Sensor Data Chart</h1>
-        <canvas id="ecChart" width="400" height="200"></canvas>
-        <canvas id="pHChart" width="400" height="200"></canvas>
-      </body>
-      </html>
-    )rawliteral");
-  });
-
-  // Route to provide sensor data as JSON
-  server.on("/data", []() {
-    String jsonResponse = "{ \"ec\": \"" + ecReading + "\", \"pH\": \"" + pHReading + "\" }";
-    server.send(200, "application/json", jsonResponse);  // Send EC and pH readings as JSON
-  });
-
-  // Start the server
-  server.begin();
-  Serial.println("Web server started!");
+  delay(1000);  // Give time for the ESP to initialize
 }
 
 void loop() {
-  // Check for data from the Arduino
-  if (Serial.available()) {
-    String input = Serial.readStringUntil('\n');  // Read the data
-    input.trim();  // Remove whitespace or newline
+  // Read incoming data from Arduino
+  while (Serial.available()) {
+    char incomingChar = Serial.read();  // Read a single character
 
-    // Parse EC or pH values
-    if (input.startsWith("EC Value:")) {
-      ecReading = input.substring(10);  // Extract EC value
-      ecReading.trim();
-      Serial.println("Updated EC value: " + ecReading);
-    } else if (input.startsWith("pH Value:")) {
-      pHReading = input.substring(10);  // Extract pH value
-      pHReading.trim();
-      Serial.println("Updated pH value: " + pHReading);
+    if (incomingChar == '\n') {
+      // If a newline character is encountered, process the data
+      Serial.print("Raw Input: ");
+      Serial.println(incomingData);  // Print the raw input for debugging
+
+      // Parse EC and pH values
+      if (incomingData.startsWith("EC Value:")) {
+        ecReading = incomingData.substring(10);  // Extract EC value
+        ecReading.trim();  // Remove any extra spaces
+        ecReading = extractNumericValue(ecReading);  // Ensure it's a numeric value
+        Serial.print("EC Reading: ");
+        Serial.println(ecReading);  // Print to Serial Monitor for verification
+      } else if (incomingData.startsWith("pH Value:")) {
+        pHReading = incomingData.substring(10);  // Extract pH value
+        pHReading.trim();  // Remove any extra spaces
+        Serial.print("pH Reading: ");
+        Serial.println(pHReading);  // Print to Serial Monitor for verification
+      }
+
+      // Clear the incoming data buffer for the next message
+      incomingData = "";
+    } else {
+      // Accumulate characters until a newline is encountered
+      incomingData += incomingChar;
     }
   }
 
-  server.handleClient();  // Handle client requests
+  // Send data to Flask server
+  sendDataToFlaskServer();
+
+  delay(2000);  // Add some delay between readings
+}
+
+// Function to extract only numeric values from the input string (e.g., removing " µS/cm")
+String extractNumericValue(String str) {
+  String result = "";
+  for (int i = 0; i < str.length(); i++) {
+    if (isDigit(str[i]) || str[i] == '.') {
+      result += str[i];  // Add numeric characters or period to the result
+    }
+  }
+  // Return the result or default to "0" if no valid number was found
+  if (result == "") {
+    result = "0";
+  }
+  return result;
+}
+
+// Function to send data to Flask server
+void sendDataToFlaskServer() {
+  WiFiClient client;
+
+  if (client.connect(serverIP, serverPort)) {
+    // Prepare JSON data to send
+    String jsonData = "{\"ec\":\"" + ecReading + "\", \"pH\":\"" + pHReading + "\"}";
+
+    // Debugging: Print out the JSON data being sent to Flask
+    Serial.print("Sending data: ");
+    Serial.println(jsonData);
+
+    // Send HTTP POST request to Flask server
+    client.println("POST /update HTTP/1.1");
+    client.println("Host: " + String(serverIP));
+    client.println("Content-Type: application/json");
+    client.print("Content-Length: ");
+    client.println(jsonData.length());
+    client.println();  // End of headers
+    client.println(jsonData);  // Send the actual JSON data
+
+    // Read server response
+    while (client.connected()) {
+      while (client.available()) {
+        String line = client.readStringUntil('\n');
+        Serial.println(line);  // Print server response for debugging
+      }
+    }
+
+    // Close the connection to the server
+    client.stop();
+  } else {
+    Serial.println("Failed to connect to Flask server.");
+  }
 }

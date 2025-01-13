@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TDS and pH Data Visualization</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      text-align: center;
+      margin: 20px;
+    }
+    canvas {
+      margin: 20px auto;
+      display: block;
+      max-width: 90%;
+    }
+  </style>
+</head>
+<body>
+  <h1>TDS (EC) and pH Data Visualization</h1>
+  <canvas id="tdsChart" width="800" height="400"></canvas>
+  <canvas id="pHChart" width="800" height="400"></canvas>
+
+  <script>
+    // Function to fetch data from Flask server
+    async function fetchData() {
+      try {
+        const response = await fetch('http://127.0.0.1:5000//data'); // Update with your Flask server's endpoint
+        const data = await response.json();
+        return data;
+      } catch (error) {
+        console.error("Error fetching data:", error);
+        return [];
+      }
+    }
+
+    // Function to render charts
+    async function renderCharts() {
+      const data = await fetchData();
+
+      // Prepare data for charts
+      const timestamps = data.map(d => new Date(d.timestamp).toLocaleTimeString()); // Format timestamps
+      const tdsValues = data.map(d => parseFloat(d.ec));
+      const pHValues = data.map(d => parseFloat(d.pH));
+
+      // TDS (EC) Chart
+      const tdsCtx = document.getElementById('tdsChart').getContext('2d');
+      new Chart(tdsCtx, {
+        type: 'line',
+        data: {
+          labels: timestamps,
+          datasets: [{
+            label: 'TDS (EC) Value',
+            data: tdsValues,
+            borderColor: 'rgba(75, 192, 192, 1)',
+            borderWidth: 2,
+            fill: false,
+          }]
+        },
+        options: {
+          responsive: true,
+          plugins: {
+            title: {
+              display: true,
+              text: 'TDS (EC) Over Time'
+            }
+          },
+          scales: {
+            x: { display: true, title: { display: true, text: 'Timestamp' }},
+            y: { display: true, title: { display: true, text: 'TDS (EC)' }}
+          }
+        }
+      });
+
+      // pH Chart
+      const pHCtx = document.getElementById('pHChart').getContext('2d');
+      new Chart(pHCtx, {
+        type: 'line',
+        data: {
+          labels: timestamps,
+          datasets: [{
+            label: 'pH Value',
+            data: pHValues,
+            borderColor: 'rgba(255, 99, 132, 1)',
+            borderWidth: 2,
+            fill: false,
+          }]
+        },
+        options: {
+          responsive: true,
+          plugins: {
+            title: {
+              display: true,
+              text: 'pH Over Time'
+            }
+          },
+          scales: {
+            x: { display: true, title: { display: true, text: 'Timestamp' }},
+            y: { display: true, title: { display: true, text: 'pH' }}
+          }
+        }
+      });
+    }
+
+    // Load charts on page load
+    renderCharts();
+  </script>
+</body>
+</html>
