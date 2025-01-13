@@ -1,15 +1,23 @@
 #include <SoftwareSerial.h>
 
-// Define the pins for EC and pH sensors
-const int ecPin = A1;         // Analog pin A1 for the EC sensor
-const int pHSensorPin = A0;   // Analog pin A0 for the pH sensor
-const int relayPin = 7;       // Pin connected to the relay module
-const int motor1 = 2;
-const int motor2 = 4;
+// Global variables
+unsigned long motorStartTime = 0;   // Motor start time for EC motor
+unsigned long lastPHCheckTime = 0; // Last time pH was checked
+unsigned long lastECMotorTime = 0; // Last time EC motor was activated
+bool motorRunning = false;          // Motor status
+bool pHCheckEnabled = true;         // Allow pH checking
+bool ECMotorEnabled = true;         // Allow EC motor activation
 
-// pH sensor calibration constants
-const float voltageAtpH7 = 3.23;  // Adjusted voltage at pH 7
-const float slope = -0.18;         // Adjust slope based on your calibration data
+// EC and pH sensor pins
+const int ecPin = A1;             // EC sensor on A1
+const int pHSensorPin = A0;       // pH sensor on A0
+const int ECMotor = 2;            // Relay control pin
+const int phMotorIncrease = 3;    // Motor for increasing pH
+const int pHMotorDecrease = 4;    // Motor for decreasing pH
+
+// pH calibration constants
+const float voltageAtpH7 = 3.15;  // Voltage at pH 7
+const float slope = -0.18;        // Slope for pH calculation
 
 // SoftwareSerial pins for ESP communication
 const int txPin = 5;  // TX pin connected to NodeMCU RX
@@ -49,17 +57,20 @@ void setup() {
 }
 
 void loop() {
-  // Read EC sensor value
-  int ecValue = analogRead(ecPin);  // Read the analog value from the EC sensor
-  float ecVoltage = ecValue * (5.0 / 1023.0);  // Convert the reading to voltage
-  float ec = ecVoltage * 1000;  // Example conversion to mS/cm (adjust as needed)
-  
-  // Read pH sensor value
-  int pHSensorValue = analogRead(pHSensorPin);  // Read the analog value from the pH sensor
+  // EC sensor reading and conversion to µS/cm
+  int ecValue = analogRead(ecPin);  // EC sensor analog read
+  float ecVoltage = ecValue * (5.0 / 1023.0);  // Convert to voltage
+  float ec = ecVoltage * probeConstant;  // Calculate EC in mS/cm using probe constant
+  float microS = ec * ecToMicroSConversionFactor;  // Convert to µS/cm
+  int finalEc = ecValue * 2.5;  // Placeholder adjustment
+
+  // pH sensor reading and calculation
+  int pHSensorValue = analogRead(pHSensorPin);  // Read pH sensor value
   float pHVoltage = pHSensorValue * (5.0 / 1023.0);  // Convert to voltage
   float pH = 7.0 + ((pHVoltage - voltageAtpH7) / slope);  // Calculate pH value
 
-  // Print EC and pH values to the Serial Monitor
+  // Adjusted EC calculation for output
+
   Serial.print("EC Value: ");
   Serial.print(finalEc);  // Output EC in µS/cm
   Serial.println(" µS/cm");
@@ -75,16 +86,70 @@ void loop() {
   espSerial.print("pH Value: ");
   espSerial.println(pH, 2);
 
-  // Relay control logic based on EC value
-  if (ec < 900) {
-    digitalWrite(relayPin, LOW);  // Turn relay off
-    digitalWrite(motor1, LOW);
-    digitalWrite(motor2, LOW);
-  } else {
-    digitalWrite(relayPin, HIGH);
-    digitalWrite(motor1, HIGH);
-    digitalWrite(motor2, HIGH);
-      // Turn relay on
+  // Trigger ECMotor if finalEc <= 150 and motor activation is allowed
+  if (finalEc <= 150 && ECMotorEnabled) {
+    Serial.println("EC Value below threshold. Activating ECMotor...");
+    digitalWrite(ECMotor, LOW);  // Turn on the motor
+    delay(4000);                 // Keep the motor on for 4 seconds
+    digitalWrite(ECMotor, HIGH); // Turn off the motor
+    Serial.println("ECMotor deactivated.");
+
+    ECMotorEnabled = false;  // Disable further motor activation
+    lastECMotorTime = millis();
+  }
+
+  // Re-enable EC motor activation after 2 minutes
+  if (!ECMotorEnabled && millis() - lastECMotorTime >= 30000) {  // 2 minutes = 120000 ms
+    Serial.println("EC motor activation re-enabled.");
+    ECMotorEnabled = true;
+  }
+
+  // Check pH if pH checks are enabled
+  if (pHCheckEnabled && (pH < 5.5 || pH > 6.5)) {
+    unsigned long startTime = millis();
+    bool withinRange = false;
+
+    Serial.println("pH out of range. Monitoring for 10 seconds...");
+    while (millis() - startTime < 10000) {
+      pHSensorValue = analogRead(pHSensorPin);
+      pHVoltage = pHSensorValue * (5.0 / 1023.0);
+      pH = 7.0 + ((pHVoltage - voltageAtpH7) / slope);
+
+      Serial.print("Current pH Value: ");
+      Serial.println(pH, 2);
+
+      if (pH >= 5.5 && pH <= 6.5) {
+        Serial.println("pH back within range.");
+        withinRange = true;
+        break;
+      }
+
+      delay(1000);  // Check every second
+    }
+
+    if (!withinRange) {
+      if (pH > 6.5) {
+        Serial.println("pH too high. Activating pHMotorDecrease...");
+        digitalWrite(pHMotorDecrease, HIGH);
+        delay(5000);
+        digitalWrite(pHMotorDecrease, LOW);
+      } else if (pH < 5.5) {
+        Serial.println("pH too low. Activating phMotorIncrease...");
+        digitalWrite(phMotorIncrease, HIGH);
+        delay(5000);
+        digitalWrite(phMotorIncrease, LOW);
+      }
+
+      Serial.println("Waiting 5 minutes to allow pH solutions to mix...");
+      pHCheckEnabled = false;  // Disable pH checking
+      lastPHCheckTime = millis();
+    }
+  }
+
+  // Re-enable pH checking after 5 minutes
+  if (!pHCheckEnabled && millis() - lastPHCheckTime >= 300000) {  // 5 minutes = 300000 ms
+    Serial.println("pH checking re-enabled.");
+    pHCheckEnabled = true;
   }
 
   delay(1000);  // Wait for a second before the next reading
